@@ -54,6 +54,7 @@ class Wigle():
         resp = requests.request(method, v2_url,
                                 auth=(self.api_name, self.api_key,))
         if resp.status_code >= 400:
+            print(resp.reason)
             raise WigleError(resp)
 
         resp = json.loads(resp.text)

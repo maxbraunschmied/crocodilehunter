@@ -113,7 +113,7 @@ class CrocodileHunter():
             self.logger.info("GPS disabled. Skipping test.")
         else:
             try:
-                gpsd.connect(**self.gpsd_args)
+                gpsd.connect()
             except (ConnectionRefusedError, ConnectionResetError, TimeoutError):
                 raise RuntimeError("Connection to GPSD failed. Please ensure GPSD is set up as " \
                     "described in the \"Configuring GPSD\" section of README.md and that " \
