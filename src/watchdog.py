@@ -296,7 +296,7 @@ class Watchdog():
         """ In case mcc isn't a standard value."""
         expected_mccs = [int(e) for e in self.config['general']['expected_mccs'].split(',')]
         if tower.mcc not in expected_mccs:
-            logfile.write(f"cid {tower.cid}: mcc is not a standard value!")
+            logfile.write(f"cid {tower.cid}: mcc is not a standard value!\n")
             self.logger.warning(f"tower {tower}: mcc is not a standard value!")
             tower.suspiciousness += 30
 
@@ -316,7 +316,7 @@ class Watchdog():
         # TODO: the above are all known MNCs in the USA from cell finder's db, but do we really
         # want to include all of them?
         if tower.mnc not in expected_mncs:
-            logfile.write(f"cid {tower.cid}: mnc is not a standard value!")
+            logfile.write(f"cid {tower.cid}: mnc is not a standard value!\n")
             self.logger.warning(f"tower {tower}: mnc is not a standard value!")
             tower.suspiciousness += 20
 
@@ -339,7 +339,7 @@ class Watchdog():
 
             # TODO: think about this some more.
             if tower.rssi is None or tower.rssi > mean + std:
-                logfile.write(f"cid {tower.cid}: signal strength after previous record now much higher!")
+                logfile.write(f"cid {tower.cid}: signal strength after previous record now much higher!\n")
                 self.logger.warning(f"tower {tower}: signal strength after previous record now much higher!")
                 tower.suspiciousness += (tower.rssi - mean)
 
@@ -355,7 +355,7 @@ class Watchdog():
 
         if existing_tower is not None:
             if existing_tower.tac != tower.tac:
-                logfile.write(f"cid {tower.cid}: different tac detected!")
+                logfile.write(f"cid {tower.cid}: different tac detected!\n")
                 self.logger.warning(f"tower {tower}: different tac detected!")
                 tower.suspiciousness += 10
 
@@ -405,7 +405,7 @@ class Watchdog():
 
         if int(distance * 10000) > int(radius * 10000):
             s_coeff = (10 * distance - radius) ** 2
-            logfile.write(f"cid {tower.cid}: tower outside expected range!")
+            logfile.write(f"cid {tower.cid}: tower outside expected range!\n")
             self.logger.warning('tower outside expected range')
             self.logger.info(f'increasing suspiciousness by {s_coeff}')
 
@@ -428,7 +428,7 @@ class Watchdog():
             rssi_std = numpy.std(rssis)
 
             if tower.rssi > rssi_mean + rssi_std:
-                logfile.write(f"cid {tower.cid}: high signal strength!")
+                logfile.write(f"cid {tower.cid}: high signal strength!\n")
                 self.logger.warning(f"tower {tower}: high signal strength!")
                 tower.suspiciousness += tower.rssi - rssi_mean
 
@@ -482,7 +482,7 @@ class Watchdog():
 
 
         if tower.external_db == ExternalTowers.not_present:
-            logfile.write(f"cid {tower.cid}: Tower not externally confirmed!")
+            logfile.write(f"cid {tower.cid}: Tower not externally confirmed!\n")
             self.logger.warning(f"Tower not externally confirmed {tower}")
             tower.suspiciousness += 30
             tower.classification = TowerClassification.suspicious
