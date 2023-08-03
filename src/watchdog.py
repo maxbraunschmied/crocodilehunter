@@ -278,9 +278,11 @@ class Watchdog():
         self.count()
 
     def check_all(self):
+        f = open("calc_susp.log", "w")
         towers = self.db_session.query(Tower).all()
         for tower in towers:
-            self.calculate_suspiciousness(tower)
+            self.calculate_suspiciousness(tower, f)
+        f.close()
 
     def get_all_by_suspicioussnes(self):
         towers = self.db_session.query(Tower).all()
@@ -290,14 +292,15 @@ class Watchdog():
     def get_all_towers_after(self, starting_id):
         return self.db_session.query(Tower).filter(Tower.id > starting_id).all()
 
-    def check_mcc(self, tower):
+    def check_mcc(self, tower, logfile):
         """ In case mcc isn't a standard value."""
         expected_mccs = [int(e) for e in self.config['general']['expected_mccs'].split(',')]
         if tower.mcc not in expected_mccs:
+            logfile.write(f"cid {tower.cid}: mcc is not a standard value!")
             self.logger.warning(f"tower {tower}: mcc is not a standard value!")
             tower.suspiciousness += 30
 
-    def check_mnc(self, tower):
+    def check_mnc(self, tower, logfile):
         """ In case mnc isn't a standard value."""
         expected_mncs = [int(e) for e in self.config['general']['expected_mncs'].split(',')]
         """
@@ -313,10 +316,11 @@ class Watchdog():
         # TODO: the above are all known MNCs in the USA from cell finder's db, but do we really
         # want to include all of them?
         if tower.mnc not in expected_mncs:
+            logfile.write(f"cid {tower.cid}: mnc is not a standard value!")
             self.logger.warning(f"tower {tower}: mnc is not a standard value!")
             tower.suspiciousness += 20
 
-    def check_existing_rssi(self, tower):
+    def check_existing_rssi(self, tower, logfile):
         """ If the same tower has been previously recorded but is suddenly
         recorded at a much higher power level."""
         existing_towers = self.db_session.query(Tower).filter(
@@ -335,10 +339,11 @@ class Watchdog():
 
             # TODO: think about this some more.
             if tower.rssi is None or tower.rssi > mean + std:
+                logfile.write(f"cid {tower.cid}: signal strength after previous record now much higher!")
                 self.logger.warning(f"tower {tower}: signal strength after previous record now much higher!")
                 tower.suspiciousness += (tower.rssi - mean)
 
-    def check_changed_tac(self, tower):
+    def check_changed_tac(self, tower, logfile):
         """ If the tower already exists but with a different tac."""
         existing_tower = self.db_session.query(Tower).filter(
                 Tower.mcc == tower.mcc,
@@ -350,6 +355,7 @@ class Watchdog():
 
         if existing_tower is not None:
             if existing_tower.tac != tower.tac:
+                logfile.write(f"cid {tower.cid}: different tac detected!")
                 self.logger.warning(f"tower {tower}: different tac detected!")
                 tower.suspiciousness += 10
 
@@ -360,7 +366,7 @@ class Watchdog():
 
 
 
-    def check_new_location(self, tower):
+    def check_new_location(self, tower, logfile):
         """ If it's the first time we've seen a tower in a given
         location (+- some threshold)."""
         # TODO: ask someone who has thought about this
@@ -399,6 +405,7 @@ class Watchdog():
 
         if int(distance * 10000) > int(radius * 10000):
             s_coeff = (10 * distance - radius) ** 2
+            logfile.write(f"cid {tower.cid}: tower outside expected range!")
             self.logger.warning('tower outside expected range')
             self.logger.info(f'increasing suspiciousness by {s_coeff}')
 
@@ -410,7 +417,7 @@ class Watchdog():
         return math.sqrt(a*a + b*b)
 
 
-    def check_rssi(self, tower):
+    def check_rssi(self, tower, logfile):
         """ If a given tower has a power signal significantly stronger than we've ever seen."""
         # TODO: maybe we should modify this to be anything over a certain threshold,
         #       like -50 db or something.
@@ -421,10 +428,11 @@ class Watchdog():
             rssi_std = numpy.std(rssis)
 
             if tower.rssi > rssi_mean + rssi_std:
+                logfile.write(f"cid {tower.cid}: high signal strength!")
                 self.logger.warning(f"tower {tower}: high signal strength!")
                 tower.suspiciousness += tower.rssi - rssi_mean
 
-    def check_wigle(self, tower):
+    def check_wigle(self, tower, logfile):
         precache = self.db_session.query(Tower).filter(
             Tower.mcc == tower.mcc,
             Tower.mnc == tower.mnc,
@@ -474,6 +482,7 @@ class Watchdog():
 
 
         if tower.external_db == ExternalTowers.not_present:
+            logfile.write(f"cid {tower.cid}: Tower not externally confirmed!")
             self.logger.warning(f"Tower not externally confirmed {tower}")
             tower.suspiciousness += 30
             tower.classification = TowerClassification.suspicious
@@ -484,7 +493,7 @@ class Watchdog():
                           "score: {tower.suspiciousness}")
         self.db_session.commit()
 
-    def calculate_suspiciousness(self, tower):
+    def calculate_suspiciousness(self, tower, logfile):
         tower.suspiciousness = 0
         # TODO: let's try some ML?
         self.logger.info(f"Calculating suspiciousness for {tower}")
@@ -493,14 +502,14 @@ class Watchdog():
             self.logger.warning(f"CHECKING COUNTRY AND CARRIER CODES, IF YOU DIDN'T CONFIGURED " \
                                  "THIS IN CONFIG.INI IT CAN LEAD TO FALSE POSITIVES. IN THAT " \
                                  "CASE WE SUGGEST TO TURN check_geographic_codes TO false")
-            self.check_mcc(tower)
-            self.check_mnc(tower)
-        self.check_existing_rssi(tower)
-        self.check_changed_tac(tower)
-        self.check_new_location(tower)
-        self.check_rssi(tower)
+            self.check_mcc(tower, logfile)
+            self.check_mnc(tower, logfile)
+        self.check_existing_rssi(tower, logfile)
+        self.check_changed_tac(tower, logfile)
+        self.check_new_location(tower, logfile)
+        self.check_rssi(tower, logfile)
         if not self.disable_wigle:
-            self.check_wigle(tower)
+            self.check_wigle(tower, logfile)
 
         if tower.suspiciousness >= 20:
             tower.classification = TowerClassification.suspicious
