@@ -12,6 +12,7 @@ from collections import namedtuple
 
 import gpsd
 import numpy
+import csv
 from sqlalchemy import func, text
 from scipy.optimize import minimize
 
@@ -274,15 +275,16 @@ class Watchdog():
         self.logger.success(f"Adding a new tower: {new_tower}")
         self.db_session.add(new_tower)
         self.db_session.commit()
-        self.calculate_suspiciousness(new_tower)
+        self.calculate_suspiciousness(new_tower, None)
         self.count()
 
     def check_all(self):
-        f = open("calc_susp.log", "w")
-        towers = self.db_session.query(Tower).all()
-        for tower in towers:
-            self.calculate_suspiciousness(tower, f)
-        f.close()
+        with open("calc_susp.csv", "w", newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["CID", "Anomality"])
+            towers = self.db_session.query(Tower).all()
+            for tower in towers:
+                self.calculate_suspiciousness(tower, writer)
 
     def get_all_by_suspicioussnes(self):
         towers = self.db_session.query(Tower).all()
@@ -292,15 +294,16 @@ class Watchdog():
     def get_all_towers_after(self, starting_id):
         return self.db_session.query(Tower).filter(Tower.id > starting_id).all()
 
-    def check_mcc(self, tower, logfile):
+    def check_mcc(self, tower, writer):
         """ In case mcc isn't a standard value."""
         expected_mccs = [int(e) for e in self.config['general']['expected_mccs'].split(',')]
         if tower.mcc not in expected_mccs:
-            logfile.write(f"cid {tower.cid}: mcc is not a standard value!\n")
+            if writer is not None:
+                writer.writerow([tower.cid, "mcc"])
             self.logger.warning(f"tower {tower}: mcc is not a standard value!")
             tower.suspiciousness += 30
 
-    def check_mnc(self, tower, logfile):
+    def check_mnc(self, tower, writer):
         """ In case mnc isn't a standard value."""
         expected_mncs = [int(e) for e in self.config['general']['expected_mncs'].split(',')]
         """
@@ -316,11 +319,12 @@ class Watchdog():
         # TODO: the above are all known MNCs in the USA from cell finder's db, but do we really
         # want to include all of them?
         if tower.mnc not in expected_mncs:
-            logfile.write(f"cid {tower.cid}: mnc is not a standard value!\n")
+            if writer is not None:
+                writer.writerow([tower.cid, "mnc"])
             self.logger.warning(f"tower {tower}: mnc is not a standard value!")
             tower.suspiciousness += 20
 
-    def check_existing_rssi(self, tower, logfile):
+    def check_existing_rssi(self, tower, writer):
         """ If the same tower has been previously recorded but is suddenly
         recorded at a much higher power level."""
         existing_towers = self.db_session.query(Tower).filter(
@@ -339,11 +343,12 @@ class Watchdog():
 
             # TODO: think about this some more.
             if tower.rssi is None or tower.rssi > mean + std:
-                logfile.write(f"cid {tower.cid}: signal strength after previous record now much higher!\n")
+                if writer is not None:
+                    writer.writerow([tower.cid, "rssi (mean)"])
                 self.logger.warning(f"tower {tower}: signal strength after previous record now much higher!")
                 tower.suspiciousness += (tower.rssi - mean)
 
-    def check_changed_tac(self, tower, logfile):
+    def check_changed_tac(self, tower, writer):
         """ If the tower already exists but with a different tac."""
         existing_tower = self.db_session.query(Tower).filter(
                 Tower.mcc == tower.mcc,
@@ -355,7 +360,8 @@ class Watchdog():
 
         if existing_tower is not None:
             if existing_tower.tac != tower.tac:
-                logfile.write(f"cid {tower.cid}: different tac detected!\n")
+                if writer is not None:
+                    writer.writerow([tower.cid, "tac"])
                 self.logger.warning(f"tower {tower}: different tac detected!")
                 tower.suspiciousness += 10
 
@@ -366,7 +372,7 @@ class Watchdog():
 
 
 
-    def check_new_location(self, tower, logfile):
+    def check_new_location(self, tower, writer):
         """ If it's the first time we've seen a tower in a given
         location (+- some threshold)."""
         # TODO: ask someone who has thought about this
@@ -405,7 +411,8 @@ class Watchdog():
 
         if int(distance * 10000) > int(radius * 10000):
             s_coeff = (10 * distance - radius) ** 2
-            logfile.write(f"cid {tower.cid}: tower outside expected range!\n")
+            if writer is not None:
+                writer.writerow([tower.cid, "location"])
             self.logger.warning('tower outside expected range')
             self.logger.info(f'increasing suspiciousness by {s_coeff}')
 
@@ -417,7 +424,7 @@ class Watchdog():
         return math.sqrt(a*a + b*b)
 
 
-    def check_rssi(self, tower, logfile):
+    def check_rssi(self, tower, writer):
         """ If a given tower has a power signal significantly stronger than we've ever seen."""
         # TODO: maybe we should modify this to be anything over a certain threshold,
         #       like -50 db or something.
@@ -428,11 +435,12 @@ class Watchdog():
             rssi_std = numpy.std(rssis)
 
             if tower.rssi > rssi_mean + rssi_std:
-                logfile.write(f"cid {tower.cid}: high signal strength!\n")
+                if writer is not None:
+                    writer.writerow([tower.cid, "rssi (high)"])
                 self.logger.warning(f"tower {tower}: high signal strength!")
                 tower.suspiciousness += tower.rssi - rssi_mean
 
-    def check_wigle(self, tower, logfile):
+    def check_wigle(self, tower, writer):
         precache = self.db_session.query(Tower).filter(
             Tower.mcc == tower.mcc,
             Tower.mnc == tower.mnc,
@@ -482,7 +490,8 @@ class Watchdog():
 
 
         if tower.external_db == ExternalTowers.not_present:
-            logfile.write(f"cid {tower.cid}: Tower not externally confirmed!\n")
+            if writer is not None:
+                writer.writerow([tower.cid, "external db"])
             self.logger.warning(f"Tower not externally confirmed {tower}")
             tower.suspiciousness += 30
             tower.classification = TowerClassification.suspicious
@@ -493,7 +502,7 @@ class Watchdog():
                           "score: {tower.suspiciousness}")
         self.db_session.commit()
 
-    def calculate_suspiciousness(self, tower, logfile):
+    def calculate_suspiciousness(self, tower, writer):
         tower.suspiciousness = 0
         # TODO: let's try some ML?
         self.logger.info(f"Calculating suspiciousness for {tower}")
@@ -502,14 +511,14 @@ class Watchdog():
             self.logger.warning(f"CHECKING COUNTRY AND CARRIER CODES, IF YOU DIDN'T CONFIGURED " \
                                  "THIS IN CONFIG.INI IT CAN LEAD TO FALSE POSITIVES. IN THAT " \
                                  "CASE WE SUGGEST TO TURN check_geographic_codes TO false")
-            self.check_mcc(tower, logfile)
-            self.check_mnc(tower, logfile)
-        self.check_existing_rssi(tower, logfile)
-        self.check_changed_tac(tower, logfile)
-        self.check_new_location(tower, logfile)
-        self.check_rssi(tower, logfile)
+            self.check_mcc(tower, writer)
+            self.check_mnc(tower, writer)
+        self.check_existing_rssi(tower, writer)
+        self.check_changed_tac(tower, writer)
+        self.check_new_location(tower, writer)
+        self.check_rssi(tower, writer)
         if not self.disable_wigle:
-            self.check_wigle(tower, logfile)
+            self.check_wigle(tower, writer)
 
         if tower.suspiciousness >= 20:
             tower.classification = TowerClassification.suspicious
